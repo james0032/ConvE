@@ -20,7 +20,7 @@ from util import AttributeDict
 
 logger = logging.getLogger(__file__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+device = torch.device("cpu") # use CPU only for now
 class StableBCELoss(nn.modules.Module):
     def __init__(self):
         super(StableBCELoss, self).__init__()
@@ -42,7 +42,7 @@ def train(epoch, data, conv_e, criterion, optimizer, args):
     conv_e.train(True)
     y_multihot = torch.LongTensor(args.batch_size, len(data.e_to_index))
     for s, r, os in progress_bar:
-        s, r = Variable(s).cuda(), Variable(r).cuda()
+        s, r = Variable(s).to(device), Variable(r).to(device)
 
         if s.size()[0] != args.batch_size:
             y_multihot = torch.LongTensor(s.size()[0], len(data.e_to_index))
@@ -51,7 +51,7 @@ def train(epoch, data, conv_e, criterion, optimizer, args):
         y_multihot = y_multihot.scatter_(1, os, 1)
         y_smooth = (1 - args.label_smooth) * y_multihot.float() + args.label_smooth / len(data.e_to_index)
 
-        targets = Variable(y_smooth, requires_grad=False).cuda()
+        targets = Variable(y_smooth, requires_grad=False).to(device)
 
         output = conv_e(s, r)
         loss = criterion(output, targets)
@@ -60,16 +60,16 @@ def train(epoch, data, conv_e, criterion, optimizer, args):
         conv_e.zero_grad()
 
         if moving_loss == 0:
-            moving_loss = loss.data[0]
+            moving_loss = loss.item()
         else:
-            moving_loss = moving_loss * 0.9 + loss.data[0] * 0.1
+            moving_loss = moving_loss * 0.9 + loss.item() * 0.1
 
         progress_bar.set_description(
-            'Epoch: {}; Loss: {:.5f}; Avg: {:.5f}'.format(epoch + 1, loss.data[0], moving_loss))
+            'Epoch: {}; Loss: {:.5f}; Avg: {:.5f}'.format(epoch + 1, loss.item(), moving_loss))
 
-    logger.info('Epoch: {}; Loss: {:.5f}; Avg: {:.5f}'.format(epoch + 1, loss.data[0], moving_loss))
+    logger.info('Epoch: {}; Loss: {:.5f}; Avg: {:.5f}'.format(epoch + 1, loss.item(), moving_loss))
     tensorboard_logger.log_value('avg loss', moving_loss, epoch + 1)
-    tensorboard_logger.log_value('loss', loss.data[0], epoch + 1)
+    tensorboard_logger.log_value('loss', loss.item(), epoch + 1)
 
 
 def valid(epoch, data, conv_e, batch_size, log_decs):
@@ -79,14 +79,14 @@ def valid(epoch, data, conv_e, batch_size, log_decs):
     conv_e.train(False)
     ranks = list()
     for s, r, os in tqdm(iter(valid_set)):
-        s, r = Variable(s).cuda(), Variable(r).cuda()
+        s, r = Variable(s).to(device), Variable(r).to(device)
         output = conv_e.test(s, r)
 
         for i in range(min(batch_size, s.size()[0])):
             _, top_indices = output[i].topk(output.size()[1])
             for o in os[i]:
                 _, rank = (top_indices == o).max(dim=0)
-                ranks.append(rank.data[0] + 1)
+                ranks.append(rank.item() + 1)
 
     ranks_t = torch.FloatTensor(ranks)
     mr = ranks_t.mean()
@@ -147,7 +147,7 @@ def main():
     valid_data.r_to_index = train_data.r_to_index
     valid_data.index_to_r = train_data.index_to_r
 
-    conv_e = ConvE(num_e=len(train_data.e_to_index), num_r=len(train_data.r_to_index)).cuda()
+    conv_e = ConvE(num_e=len(train_data.e_to_index), num_r=len(train_data.r_to_index)).to(device)
     criterion = StableBCELoss()
     optimizer = optim.Adam(conv_e.parameters(), lr=0.003)
 
