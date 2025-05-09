@@ -19,7 +19,7 @@ from model import ConvE
 from util import AttributeDict
 
 logger = logging.getLogger(__file__)
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class StableBCELoss(nn.modules.Module):
     def __init__(self):
